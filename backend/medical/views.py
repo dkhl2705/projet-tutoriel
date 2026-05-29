@@ -33,7 +33,7 @@ class ScopedOwnerMixin:
 
 
 class HospitalViewSet(viewsets.ModelViewSet):
-    queryset = Hospital.objects.all()
+    queryset = Hospital.objects.filter(is_active=True)
     serializer_class = HospitalSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -48,7 +48,7 @@ class ChildProfileViewSet(ScopedOwnerMixin, viewsets.ModelViewSet):
 
 
 class VaccineCatalogViewSet(viewsets.ModelViewSet):
-    queryset = VaccineCatalog.objects.all()
+    queryset = VaccineCatalog.objects.filter(is_active=True)
     serializer_class = VaccineCatalogSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -58,11 +58,23 @@ class VaccinationRecordViewSet(ScopedOwnerMixin, viewsets.ModelViewSet):
     serializer_class = VaccinationRecordSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def perform_create(self, serializer):
+        if self.request.user.role == "medecin":
+            serializer.save(doctor=self.request.user)
+        else:
+            serializer.save()
+
 
 class AppointmentViewSet(ScopedOwnerMixin, viewsets.ModelViewSet):
     queryset = Appointment.objects.select_related("child", "hospital", "doctor")
     serializer_class = AppointmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+    def perform_create(self, serializer):
+        if self.request.user.role == "medecin":
+            serializer.save(doctor=self.request.user)
+        else:
+            serializer.save()
 
 
 class ReminderViewSet(ScopedOwnerMixin, viewsets.ModelViewSet):

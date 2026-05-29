@@ -61,8 +61,11 @@ class MeView(APIView):
                         "id": child.id,
                         "first_name": child.first_name,
                         "last_name": child.last_name,
-                        "birth_date": child.birth_date,
+                        "birth_date": str(child.birth_date) if child.birth_date else None,
                         "gender": child.gender,
+                        "blood_type": child.blood_type,
+                        "allergies": child.allergies,
+                        "notes": child.notes,
                     }
                     for child in children
                 ],

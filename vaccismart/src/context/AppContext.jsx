@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  getChildren,
+  getVaccinations,
+  getHospitals,
+  getReminders,
+  normalizeChild,
+  buildDoctorPatients,
+} from '../services/api';
 
 const STORAGE_KEY = 'vaccismart_auth';
 const Ctx = createContext();
@@ -6,7 +14,7 @@ const Ctx = createContext();
 const readStoredAuth = () => {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -31,25 +39,92 @@ export const AppProvider = ({ children }) => {
   const [selectedChild, setSelectedChild] = useState(0);
   const [authState, setAuthState] = useState(storedAuth);
 
+  // ── API data state ──────────────────────────────────────────────
+  const [apiChildren, setApiChildren] = useState([]);
+  const [apiVaccinations, setApiVaccinations] = useState([]);
+  const [apiHospitals, setApiHospitals] = useState([]);
+  const [apiReminders, setApiReminders] = useState([]);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [dataError, setDataError] = useState(false);
+
   const toggleMode = () =>
-    setIsNight((night) => {
-      document.body.className = !night ? 'night' : '';
-      return !night;
+    setIsNight((n) => {
+      document.body.className = !n ? 'night' : '';
+      return !n;
     });
 
-  React.useEffect(() => {
+  useEffect(() => {
     document.body.className = isNight ? 'night' : '';
   }, [isNight]);
 
+  const fetchData = useCallback(async (token) => {
+    if (!token) return;
+    setDataError(false);
+    try {
+      const [ch, vax, hosp, rem] = await Promise.all([
+        getChildren(token),
+        getVaccinations(token),
+        getHospitals(token),
+        getReminders(token),
+      ]);
+      setApiChildren(Array.isArray(ch) ? ch : []);
+      setApiVaccinations(Array.isArray(vax) ? vax : []);
+      setApiHospitals(Array.isArray(hosp) ? hosp : []);
+      setApiReminders(Array.isArray(rem) ? rem : []);
+    } catch (err) {
+      console.warn('fetchData error:', err.message);
+      setDataError(true);
+    } finally {
+      setDataLoaded(true);
+    }
+  }, []);
+
+  // Auto-load on mount if already authenticated
+  useEffect(() => {
+    if (storedAuth?.tokens?.access) {
+      fetchData(storedAuth.tokens.access);
+    } else {
+      setDataLoaded(true);
+    }
+  }, []); // mount only — storedAuth is read once at init
+
+  // ── Normalized / derived data ───────────────────────────────────
+  const appChildren = useMemo(
+    () => apiChildren.map((c) => normalizeChild(c, apiVaccinations)),
+    [apiChildren, apiVaccinations]
+  );
+
+  const hospitals = useMemo(
+    () =>
+      apiHospitals.map((h) => ({
+        id: h.id,
+        name: h.name,
+        code: h.code,
+        distance: h.city,
+        open: h.is_active,
+        rating: 4.0,
+        address: h.address || h.city,
+        vaccines: [],
+        phone: h.phone || '',
+      })),
+    [apiHospitals]
+  );
+
+  const doctorPatients = useMemo(
+    () => buildDoctorPatients(apiChildren, apiVaccinations),
+    [apiChildren, apiVaccinations]
+  );
+
+  // ── Auth actions ────────────────────────────────────────────────
   const loginSuccess = ({ user: rawUser, tokens }) => {
     const normalizedUser = normalizeUser(rawUser);
     const nextState = { user: normalizedUser, tokens };
-
     setRole(normalizedUser.role);
     setUser(normalizedUser);
     setAuthState(nextState);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
     setPage(normalizedUser.role === 'medecin' ? 'doctor-upcoming' : 'dashboard');
+    fetchData(tokens.access);
   };
 
   const logout = () => {
@@ -57,6 +132,13 @@ export const AppProvider = ({ children }) => {
     setUser(null);
     setAuthState(null);
     setPage('register');
+    setApiChildren([]);
+    setApiVaccinations([]);
+    setApiHospitals([]);
+    setApiReminders([]);
+    setDataLoaded(false);
+    setDataError(false);
+    setSelectedChild(0);
     localStorage.removeItem(STORAGE_KEY);
     document.body.className = '';
     setIsNight(false);
@@ -75,8 +157,16 @@ export const AppProvider = ({ children }) => {
       selectedChild,
       setSelectedChild,
       authState,
+      // Data
+      appChildren,
+      hospitals,
+      doctorPatients,
+      reminders: apiReminders,
+      dataLoaded,
+      dataError,
+      refetchData: () => authState?.tokens?.access && fetchData(authState.tokens.access),
     }),
-    [isNight, role, user, page, selectedChild, authState]
+    [isNight, role, user, page, selectedChild, authState, appChildren, hospitals, doctorPatients, apiReminders, dataLoaded, dataError]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
